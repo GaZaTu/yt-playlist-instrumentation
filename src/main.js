@@ -31,6 +31,16 @@ const QUEUE = [
     sent: false,
     done: false,
   },
+  {
+    id: '2',
+    ytID: 'JQsdgenRLHY',
+    title: `Oj Alija Aljo! - English Lyrics`,
+    channel: 'João Karaś',
+    requestedBy: 'Supinic is mega SMOL',
+    requestedByUserId: '',
+    sent: false,
+    done: false,
+  },
   // {
   //   id: '2',
   //   sent: false,
@@ -101,7 +111,7 @@ const createWindow = async () => {
     // title: 'YT-Playlist-Instrumentor',
     // icon: '',
     width: 850,
-    height: 650,
+    height: 675,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: false,
