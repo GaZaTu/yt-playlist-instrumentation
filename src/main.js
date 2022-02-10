@@ -4,6 +4,8 @@ const { ElectronBlocker } = require('@cliqz/adblocker-electron')
 const createContextMenu = require('electron-context-menu')
 const { default: fetch } = require('node-fetch')
 const ProxyAgent = require('proxy-agent')
+const { TwitchIrcBot } = require('./lib/twitch')
+const config = require('config')
 
 const HTTP_PROXY = process.env.HTTP_PROXY
 const httpProxyAgent = HTTP_PROXY && new ProxyAgent(HTTP_PROXY)
@@ -118,8 +120,16 @@ const createWindow = async () => {
     })
 
     metadata.current = await getNextInMyYTPlaylist()
-    metadata.next = await getNextInMyYTPlaylist()
+    if (!metadata.current?.ytID) {
+      metadata.current = {
+        ytID: 'ke5TOxeEL8Q',
+        title: 'Obama On Fireー☆',
+        channel: 'MikamiIsAJerk',
+        requestedBy: 'your mom',
+      }
+    }
 
+    metadata.next = await getNextInMyYTPlaylist()
     if (!metadata.next?.ytID) {
       metadata.next = undefined
     }
@@ -156,6 +166,29 @@ const createWindow = async () => {
 
   // Open the DevTools.
   // mainWindow.webContents.openDevTools()
+
+  const bot = new TwitchIrcBot()
+
+  bot
+    .on('connect')
+    .subscribe(async () => {
+      if (config.has('nick') && config.has('pass')) {
+        await bot.login(config.get('nick'), config.get('pass'))
+      } else {
+        await bot.loginAnon()
+      }
+
+      await bot.reqCap('commands')
+      await bot.reqCap('membership')
+      await bot.reqCap('tags')
+
+      await bot.join(config.get('channel'))
+    })
+
+  bot.connect()
+
+  bot.command(/^!sr$/)
+    .subscribe(req => req.send('FML'))
 }
 
 // This method will be called when Electron has finished
