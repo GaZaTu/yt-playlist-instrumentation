@@ -20,89 +20,66 @@ const fetchWithSystemProxy = (url, init) =>
 //   app.commandLine.appendSwitch('enable-gpu-rasterization')
 // }
 
-const QUEUE = [
-  {
-    id: '1',
-    ytID: 'ke5TOxeEL8Q',
-    title: `Obama On Fireー☆`,
-    channel: 'MikamiIsAJerk',
-    requestedBy: 'GaZaTu',
-    requestedByUserId: '',
-    sent: false,
-    done: false,
-  },
-  {
-    id: '2',
-    ytID: 'JQsdgenRLHY',
-    title: `Oj Alija Aljo! - English Lyrics`,
-    channel: 'João Karaś',
-    requestedBy: 'Supinic is mega SMOL',
-    requestedByUserId: '',
-    sent: false,
-    done: false,
-  },
-  // {
-  //   id: '2',
-  //   sent: false,
-  //   done: true,
-  // },
-  {
-    id: '3',
-    ytID: 'UsGg0wFSkOY',
-    title: `Pajlada Trick`,
-    channel: 'TOP KEK',
-    requestedBy: 'Supinic',
-    requestedByUserId: '',
-    sent: false,
-    done: false,
-  },
-  // {
-  //   id: '4',
-  //   sent: false,
-  //   done: true,
-  // },
-  {
-    id: '5',
-    ytID: 'Q0o8H7oDHB0',
-    title: `♂ KUNG BILLY - TRUE ASS WARRIOR (from WRESTLERS: MUSCLE FANTASIES 2) ♂`,
-    channel: 'BBilly BBerrington',
-    requestedBy: 'GaZaTu',
-    requestedByUserId: '',
-    sent: false,
-    done: false,
-  },
-  {
-    id: '6',
-    ytID: 'zxptc68Mpw4',
-    title: `♂ GACHIBANK - BILL AUGHRIGHT ♂`,
-    channel: 'BBilly BBerrington',
-    requestedBy: 'GaZaTu',
-    requestedByUserId: '',
-    sent: false,
-    done: false,
-  },
-]
+/**
+ * @param {RequestInit} [init]
+ * @returns
+ */
+const createFetchGraphQL = (init) => {
+  /**
+   * @param {string} query
+   * @param {object} [variables]
+   * @returns {Promise<object>}
+   */
+  return (query, variables) => {
+    const url = `https://api.gazatu.xyz/graphql`
+    const config = {
+      ...init,
+      mode: 'cors',
+      method: 'POST',
+      headers: {
+        ...init?.headers,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        query,
+        variables,
+      }),
+    }
 
-const getNextInQueue = () => {
-  const next = QUEUE.find(e => !e.sent)
-  if (next) {
-    next.sent = true
+    return fetchWithSystemProxy(url, config)
+      .then(r => r.json())
   }
-
-  return Promise.resolve(next)
 }
 
-const finishInQueue = (find) => {
+let fetchGraphQL = createFetchGraphQL()
+
+const getNextInMyYTPlaylistQuery = `
+query {
+  getNextInMyYTPlaylist {
+    ytID
+    title
+    channel
+    requestedBy
+  }
+}
+`
+const getNextInMyYTPlaylist = () => {
+  return fetchGraphQL(getNextInMyYTPlaylistQuery)
+    .then(r => r.getNextInMyYTPlaylist)
+}
+
+const finishCurrentInMyYTPlaylistMutation = `
+mutation {
+  finishCurrentInMyYTPlaylist { }
+}
+`
+const finishCurrentInMyYTPlaylist = (find) => {
   if (!find) {
     return
   }
 
-  const current = QUEUE.find(e => e.id === find.id)
-  if (current) {
-    current.done = true
-  }
-
-  return Promise.resolve(undefined)
+  return fetchGraphQL(finishCurrentInMyYTPlaylistMutation)
+    .then(r => r.finishCurrentInMyYTPlaylist)
 }
 
 const createWindow = async () => {
@@ -111,7 +88,7 @@ const createWindow = async () => {
     // title: 'YT-Playlist-Instrumentor',
     // icon: '',
     width: 850,
-    height: 675,
+    height: 680,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: false,
@@ -134,8 +111,14 @@ const createWindow = async () => {
   })
 
   ipcMain.on('login', async (event, authToken) => {
-    metadata.current = await getNextInQueue()
-    metadata.next = await getNextInQueue()
+    fetchGraphQL = createFetchGraphQL({
+      headers: {
+        'authorization': `Bearer ${authToken}`,
+      },
+    })
+
+    metadata.current = await getNextInMyYTPlaylist()
+    metadata.next = await getNextInMyYTPlaylist()
 
     if (!metadata.next?.ytID) {
       metadata.next = undefined
@@ -147,7 +130,7 @@ const createWindow = async () => {
 
   ipcMain.handle('getNextInQueue', async () => {
     metadata.current = metadata.next
-    metadata.next = await getNextInQueue()
+    metadata.next = await getNextInMyYTPlaylist()
 
     if (!metadata.next?.ytID) {
       metadata.next = undefined
@@ -165,11 +148,10 @@ const createWindow = async () => {
   })
 
   ipcMain.on('emptied', async (event, current) => {
-    await finishInQueue(current)
+    await finishCurrentInMyYTPlaylist(current)
   })
 
   // await mainWindow.loadFile(`${__dirname}/login.html`)
-
   await mainWindow.loadURL('https://gazatu.xyz/login')
 
   // Open the DevTools.

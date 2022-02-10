@@ -34,9 +34,11 @@ const modifyYTNextData = (next, modification) => {
   } catch {}
 
   try {
+    next.playerOverlays.playerOverlayRenderer.autoplay ||= {}
+    next.playerOverlays.playerOverlayRenderer.autoplay.playerOverlayAutoplayRenderer ||= {}
     const autoplayRenderer = next.playerOverlays.playerOverlayRenderer.autoplay.playerOverlayAutoplayRenderer
     try {
-      const autoplayVideoTitle = autoplayRenderer.videoTitle
+      const autoplayVideoTitle = autoplayRenderer.videoTitle = autoplayRenderer.videoTitle || {}
       try {
         autoplayVideoTitle.simpleText = title
       } catch {}
@@ -46,8 +48,13 @@ const modifyYTNextData = (next, modification) => {
     } catch {}
 
     try {
+      autoplayRenderer.nextButton ||= {}
+      autoplayRenderer.nextButton.buttonRenderer ||= {}
+      autoplayRenderer.nextButton.buttonRenderer.navigationEndpoint ||= {}
       const autoplayEndpoint = autoplayRenderer.nextButton.buttonRenderer.navigationEndpoint
       try {
+        autoplayEndpoint.commandMetadata ||= {}
+        autoplayEndpoint.commandMetadata.webCommandMetadata ||= {}
         autoplayEndpoint.commandMetadata.webCommandMetadata.url = `/watch?v=${ytID}`
       } catch {}
       try {
@@ -95,14 +102,10 @@ window.fetch = async (...args) => {
     }
 
     const json = async () => {
-      // await new Promise(resolve => setTimeout(resolve, 10 * 1000))
-
-      const json = await getJson()
+      const json = window.ytInitialData = await getJson()
       const next = await ipcRenderer.invoke('getNextInQueue')
 
       modifyYTNextData(json, next)
-
-      window.ytInitialData = json
 
       return json
     }
@@ -217,13 +220,16 @@ window.addEventListener('DOMContentLoaded', () => {
     enableTheaterMode(false)
 
     ipcRenderer.send('emptied', window.currentVideo)
+
+    setTimeout(() => {
+      if (!ytVideo.src) {
+        document.querySelector('.ytp-next-button').click()
+      }
+    }, 5000)
   })
 
-  const json = ytInitialData
+  const json = window.ytInitialData
   const next = ipcRenderer.sendSync('getNextInQueueSync')
-
-  console.log('ytInitialData', ytInitialData)
-  console.log('next', next)
 
   modifyYTNextData(json, next)
 })
