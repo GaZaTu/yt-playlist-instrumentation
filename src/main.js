@@ -3,92 +3,76 @@ const { app, session, ipcMain, BrowserWindow } = require('electron')
 const { ElectronBlocker } = require('@cliqz/adblocker-electron')
 const createContextMenu = require('electron-context-menu')
 const { default: fetch } = require('node-fetch')
-const ProxyAgent = require('proxy-agent')
 const { TwitchIrcBot } = require('./lib/twitch')
 const config = require('config')
 
-const HTTP_PROXY = process.env.HTTP_PROXY
-const httpProxyAgent = HTTP_PROXY && new ProxyAgent(HTTP_PROXY)
+const resolveYTVideo = async (url) => {
+  if (!url) {
+    return undefined
+  }
 
-/** @type {typeof fetch} */
-const fetchWithSystemProxy = (url, init) =>
-  fetch(url, {
-    agent: httpProxyAgent,
-    ...init,
-  })
+  if (url.startsWith('/watch')) {
+    url = `https://youtube.com${url}`
+  }
 
-// if (process.platform === 'linux') {
-//   app.commandLine.appendSwitch('enable-features', 'VaapiVideoDecoder')
-//   app.commandLine.appendSwitch('enable-gpu-rasterization')
-// }
+  if (!url.startsWith('http')) {
+    url = `https://youtube.com/watch?v=${url}`
+  }
 
-/**
- * @param {RequestInit} [init]
- * @returns
- */
-const createFetchGraphQL = (init) => {
-  /**
-   * @param {string} query
-   * @param {object} [variables]
-   * @returns {Promise<object>}
-   */
-  return (query, variables) => {
-    const url = `https://api.gazatu.xyz/graphql`
-    const config = {
-      ...init,
-      mode: 'cors',
-      method: 'POST',
-      headers: {
-        ...init?.headers,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        query,
-        variables,
-      }),
-    }
+  const noembedUrl = `https://noembed.com/embed?url=${url}`
+  const response = await fetch(noembedUrl)
+    .then(r => r.json())
 
-    return fetchWithSystemProxy(url, config)
-      .then(r => r.json())
+  if (response.error !== undefined) {
+    return undefined
+  }
+
+  const regex = /https:\/\/www\.youtube\.com\/embed\/([^?]+)/
+  const match = regex.exec(response.html)
+
+  if (!match) {
+    return undefined
+  }
+
+  return {
+    ytID: match[1],
+    channel: response.author_name,
+    title: response.title,
   }
 }
 
-let fetchGraphQL = createFetchGraphQL()
+const QUEUE = [
+  {
+    ytID: 'ke5TOxeEL8Q',
+    title: `Obama On Fireー☆`,
+    channel: 'MikamiIsAJerk',
+    requestedBy: 'your mom',
+    sent: false,
+    done: false,
+  },
+]
 
-const getNextInMyYTPlaylistQuery = `
-query {
-  getNextInMyYTPlaylist {
-    ytID
-    title
-    channel
-    requestedBy
-  }
-}
-`
 const getNextInMyYTPlaylist = () => {
-  return fetchGraphQL(getNextInMyYTPlaylistQuery)
-    .then(r => r.getNextInMyYTPlaylist)
-}
-
-const finishCurrentInMyYTPlaylistMutation = `
-mutation {
-  finishCurrentInMyYTPlaylist { }
-}
-`
-const finishCurrentInMyYTPlaylist = (find) => {
-  if (!find) {
-    return
+  const next = QUEUE.find(e => !e.sent)
+  if (next) {
+    next.sent = true
   }
 
-  return fetchGraphQL(finishCurrentInMyYTPlaylistMutation)
-    .then(r => r.finishCurrentInMyYTPlaylist)
+  return Promise.resolve(next)
+}
+
+const finishCurrentInMyYTPlaylist = () => {
+  const current = QUEUE.find(e => !e.done)
+  if (current) {
+    current.done = true
+  }
+
+  return Promise.resolve(undefined)
 }
 
 const createWindow = async () => {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
-    // title: 'YT-Playlist-Instrumentor',
-    // icon: '',
     width: 850,
     height: 680,
     webPreferences: {
@@ -112,13 +96,7 @@ const createWindow = async () => {
     console.log(...args)
   })
 
-  ipcMain.on('login', async (event, authToken) => {
-    fetchGraphQL = createFetchGraphQL({
-      headers: {
-        'authorization': `Bearer ${authToken}`,
-      },
-    })
-
+  ipcMain.on('login', async (event) => {
     metadata.current = await getNextInMyYTPlaylist()
     if (!metadata.current?.ytID) {
       metadata.current = {
@@ -162,7 +140,9 @@ const createWindow = async () => {
   })
 
   // await mainWindow.loadFile(`${__dirname}/login.html`)
-  await mainWindow.loadURL('https://gazatu.xyz/login')
+  // await mainWindow.loadURL('https://gazatu.xyz/login')
+  await mainWindow.loadURL(`https://www.youtube.com`)
+  ipcMain.emit('login', undefined)
 
   // Open the DevTools.
   // mainWindow.webContents.openDevTools()
@@ -187,19 +167,53 @@ const createWindow = async () => {
 
   bot.connect()
 
-  bot.command(/^!sr$/)
-    .subscribe(req => req.send('FML'))
+  bot.command(/^!sr\s+(\S+)$/)
+    .subscribe(async req => {
+      const byUser = QUEUE
+        .filter(r => r.sent === false && r.done === false && r.requestedBy === req.usr)
+
+      if (byUser.length > 3) {
+        if (config.has('nick')) {
+          await req.reply(`you have too many active requests in queue`)
+        }
+
+        return
+      }
+
+      const video = await resolveYTVideo(req.match[1])
+
+      QUEUE.push({
+        ...video,
+        requestedBy: req.usr,
+        sent: false,
+        done: false,
+      })
+
+      const tbd = QUEUE
+        .filter(r => r.sent === false && r.done === false)
+
+      if (config.has('nick')) {
+        await req.reply(`you successfully requested "${video.title}", spot in queue: #${tbd.length + 1}`)
+      }
+    })
+
+  bot.command(/^!(playing|song)/)
+    .subscribe(async req => {
+      if (config.has('nick')) {
+        if (metadata.current) {
+          await req.reply(`currently playing "${metadata.current.title}" https://www.youtube.com/watch?v=${metadata.current.ytID}`)
+        } else {
+          await req.reply(`not currently playing anything (or youtube autoplay)`)
+        }
+      }
+    })
 }
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(async () => {
-  await session.defaultSession.setProxy({
-    proxyRules: HTTP_PROXY,
-  })
-
-  const adBlocker = await ElectronBlocker.fromPrebuiltAdsAndTracking(fetchWithSystemProxy)
+  const adBlocker = await ElectronBlocker.fromPrebuiltAdsAndTracking(fetch)
   adBlocker.enableBlockingInSession(session.defaultSession)
 
   createContextMenu()
